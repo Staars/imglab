@@ -98,42 +98,152 @@
             //$("#thumbnail_0").click(); as this triggers before images are uploaded it cuase issue. Load it with an interval
         })
 
-         function readImageFiles(e) {
-            console.log(this);
+        function readImageFiles(e) {
             var input = e.srcElement || e.target;
             if (input.files && input.files[0]) {
                 for (i = 0; i < input.files.length; i++) {
-                    this.readImageFile(input.files[i]);
+                    this.readImageFile(input.files[i], input.files);
                 }
             }
+        }
+
+        function checkForPTS(imageFile, files) {
+            // console.log(files);
+            var imgName = imageFile.name.split(".")[0];
+            for (i = 0; i < files.length; i++) {
+                var ptsFile = files[i];
+                if (ptsFile.name.split(".")[0] === imgName){
+                    if (ptsFile.name.substr(files[i].name.lastIndexOf('.') + 1) == "pts") {
+                        readPTSFile(ptsFile, imageFile);
+                    }
+                }
+            }
+            
+        }
+
+        function readPTSFile(file, imageFile) {
+            var reader = new FileReader();
+            reader.onloadend = e => {
+                    console.log("Read PTS for:" , imageFile);
+                    var result = e.target.result;
+                    var rePoints = /n_points:(.*)/g;
+                    var pointNumber = (result.match(rePoints)[0].replace("n_points:  ",""));
+                    var pairBlock = result.split("{",2)[1];
+                    var pointPairs = pairBlock.split("\n");
+                    insertPoints(imageFile, pointPairs, pointNumber);
+            }
+            reader.readAsText(file);
+        }
+
+        function insertPoints(imageFile, pointPairs, pointNumber) {
+            
+            var currentImage = labellingData[imageFile.name];
+            // console.log(pointPairs);
+            var boxObject = [];
+            boxObject .push({
+                    id : "rect" + imageFile.name,
+                    label: "autoimportedPTS",
+                    type: "rect",
+                    bbox : {
+                        x: 0,
+                        y: 0,
+                        h: 1,
+                        w: 1,
+                        /* ignore: currentBox.ignore */
+                        /* pose='4' detection_score='4' */
+                    },
+                    points : [
+                    0, 
+                    0, 
+                    1, 
+                    1,
+                    ],
+                    attributes : [],
+                    featurePoints: []
+                })
+
+            var firstPair =    pointPairs[1].split(" ");
+            var minX = Number(firstPair[0]);
+            var maxX = Number(firstPair[0]);
+            var minY = Number(firstPair[1]);
+            var maxY = Number(firstPair[1]);
+
+            var counter = pointNumber
+            while (counter > 0) {
+                var pointlabel = (pointNumber-counter+1);
+                var pair = pointPairs[pointNumber-counter+1].split(" ");
+                boxObject[0].featurePoints.push({
+                    id: "point" + counter,
+                    x: pair[0]/*  - currentBox.left */,
+                    y: pair[1]/*  - currentBox.top */,
+                    label: pointlabel
+                });
+                if (minX > Number(pair[0])) {
+                    // console.log("minX: " + minX + ">" + pair[0]);
+                    minX = Number(pair[0]);
+                    
+                }
+                if (minY > Number(pair[1])) {
+                    // console.log("minY: " + minY + ">" + pair[1]);
+                    minY = Number(pair[1]);
+                    
+                }
+                if (maxX < Number(pair[0])) {
+                    // console.log("maxX: " + maxX + "<" + pair[0]);
+                    maxX = Number(pair[0]);
+                    
+                }
+                if (maxY < Number(pair[1])) {
+                    // console.log("maxY: " + maxY + "<" + pair[1]);
+                    maxY = Number(pair[1]);
+                    
+                }
+
+                counter = counter - 1;
+                }
+
+            // console.log(boxObject);
+            // console.log(minX + minY + (maxY - minY) + (maxX - minX));
+            boxObject[0].bbox.x = minX;
+            boxObject[0].bbox.y = minY;
+            boxObject[0].bbox.h = maxY - minY;
+            boxObject[0].bbox.w = maxX - minX;
+            boxObject[0].points = [minX, minY, maxY - minY, maxX - minX];
+
+            currentImage.shapes =  boxObject;
+
+            // console.log(currentImage);
+            // console.log(boxObject);
+
         }
 
         tag.thumbnails = [];
         tag.currentIndex = 0;
         this.thumbnailWidth = this.opts.thumbnail_width || "80px";
 
-        function readImageFile(f) {
+        function readImageFile(f,i) {
             if (f.type.startsWith("image")) {
                 var reader = new FileReader();
                 reader.onload = e => {
-                    console.log(e);
+                    // console.log(e);
                     var imgData = {
                         name: f.name,
                         src: e.target.result
                     };
-                    updateDimentions(e.target.result, imgData);
+                    updateDimentions(e.target.result, imgData, f, i);
                     tag.thumbnails.push(imgData);
 
                     this.trigger("uploadimages");
                 }
                 reader.onloadend = e => {
+                    
                     this.update();
                 }
                 reader.readAsDataURL(f);
             }
         }
 
-        function updateDimentions(imgFileSrc, imageDataObject) {
+        function updateDimentions(imgFileSrc, imageDataObject, f, i) {
             var img = new Image();
             img.onload = function () {
                 imageDataObject.size = {
@@ -144,6 +254,7 @@
                     imageScale: 1
                 }
                 addImgToStore(imageDataObject.name, imageDataObject.size);
+                checkForPTS(f,i);
             }
             img.src = imgFileSrc;
         }
